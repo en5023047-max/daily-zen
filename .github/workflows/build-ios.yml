@@ -1,4 +1,4 @@
-name: Build Valid iOS IPA
+name: Build iOS IPA (Auto-detect)
 
 on:
   push:
@@ -23,13 +23,14 @@ jobs:
           npm install
           npm install -g expo-cli
       
-      - name: Create assets folder with dummy images
+      - name: Create assets folder
         run: |
           mkdir -p assets
-          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/icon.png
-          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/splash.png
-          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/adaptive-icon.png
-          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/favicon.png
+          # إنشاء صور فارغة بصيغة PNG صالحة
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\xdac\xfc\xff\xff?\x00\x05\xfe\x02\xfe\xb0\xb5\x0f\x17\x00\x00\x00\x00IEND\xaeB`\x82' > assets/icon.png
+          cp assets/icon.png assets/splash.png
+          cp assets/icon.png assets/adaptive-icon.png
+          cp assets/icon.png assets/favicon.png
       
       - name: Create minimal app.json
         run: |
@@ -50,9 +51,6 @@ jobs:
               "ios": {
                 "supportsTablet": true,
                 "bundleIdentifier": "com.en5023047.dailyzen"
-              },
-              "android": {
-                "package": "com.en5023047.dailyzen"
               }
             }
           }
@@ -61,34 +59,60 @@ jobs:
       - name: Prebuild iOS project
         run: npx expo prebuild --platform ios --clean
       
+      - name: List files to find project name
+        run: |
+          echo "Listing iOS directory:"
+          ls -la ios/ || echo "ios directory not found"
+          echo ""
+          echo "Looking for .xcworkspace or .xcodeproj:"
+          find . -name "*.xcworkspace" -o -name "*.xcodeproj" 2>/dev/null
+      
       - name: Build IPA
         run: |
           cd ios
-          xcodebuild -workspace daily-zen.xcworkspace \
-            -scheme daily-zen \
-            -configuration Release \
-            -sdk iphoneos \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            build
           
-          # إنشاء IPA
-          mkdir Payload
-          cp -r build/Release-iphoneos/daily-zen.app Payload/
-          zip -r ../daily-zen.ipa Payload
+          # البحث عن ملف xcworkspace أو xcodeproj
+          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+          PROJECT=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
           
-          # التحقق من حجم الملف
-          ls -la ../daily-zen.ipa
-      
-      - name: Verify IPA file
-        run: |
-          if [ -f "daily-zen.ipa" ] && [ -s "daily-zen.ipa" ]; then
-            echo "✅ IPA file created successfully"
-            file daily-zen.ipa
-            unzip -l daily-zen.ipa | head -20
+          if [ -n "$WORKSPACE" ]; then
+            echo "Building with workspace: $WORKSPACE"
+            xcodebuild -workspace "$WORKSPACE" \
+              -scheme daily-zen \
+              -configuration Release \
+              -sdk iphoneos \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              build
+          elif [ -n "$PROJECT" ]; then
+            echo "Building with project: $PROJECT"
+            xcodebuild -project "$PROJECT" \
+              -scheme daily-zen \
+              -configuration Release \
+              -sdk iphoneos \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              build
           else
-            echo "❌ IPA file is empty or missing"
+            echo "No workspace or project found!"
+            ls -la
+            exit 1
+          fi
+          
+          # البحث عن مجلد build الناتج
+          if [ -d "build/Release-iphoneos/daily-zen.app" ]; then
+            mkdir -p Payload
+            cp -r build/Release-iphoneos/daily-zen.app Payload/
+            zip -r ../daily-zen.ipa Payload
+          elif [ -d "build/Build/Products/Release-iphoneos/daily-zen.app" ]; then
+            mkdir -p Payload
+            cp -r build/Build/Products/Release-iphoneos/daily-zen.app Payload/
+            zip -r ../daily-zen.ipa Payload
+          else
+            echo "Could not find .app file"
+            find . -name "*.app" 2>/dev/null
             exit 1
           fi
       
@@ -97,4 +121,3 @@ jobs:
         with:
           name: daily-zen-ipa
           path: daily-zen.ipa
-          if-no-files-found: error
