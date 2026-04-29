@@ -1,16 +1,16 @@
 name: Build iOS App on macOS Cloud
 
 on:
-  workflow_dispatch:  # تشغيل يدوي فقط
+  workflow_dispatch:
   push:
-    branches: [ main ]  # أوتوماتيكي عند رفع كود
+    branches: [ main ]
 
 jobs:
   build-ios:
-    runs-on: macos-latest  # GitHub يوفر Mac سحابي مجاني
+    runs-on: macos-latest
     
     steps:
-      - name: 📥 استلام الكود من المستودع
+      - name: 📥 استلام الكود
         uses: actions/checkout@v4
       
       - name: 🔧 إعداد Node.js
@@ -18,13 +18,13 @@ jobs:
         with:
           node-version: '18'
       
-      - name: 📦 تثبيت الاعتماديات (dependencies)
+      - name: 📦 تثبيت الاعتماديات
         run: npm install
       
       - name: 🍎 تثبيت Expo CLI
         run: npm install -g expo-cli
       
-      - name: 📝 إنشاء ملف app.json بسيط
+      - name: 📝 إنشاء app.json بدون أي صور
         run: |
           cat > app.json << 'EOF'
           {
@@ -33,62 +33,53 @@ jobs:
               "slug": "daily-zen",
               "version": "1.0.0",
               "orientation": "portrait",
-              "icon": "./assets/icon.png",
               "userInterfaceStyle": "light",
               "assetBundlePatterns": ["**/*"],
               "ios": {
                 "supportsTablet": true,
                 "bundleIdentifier": "com.dailyzen.app"
+              },
+              "android": {
+                "package": "com.dailyzen.app"
               }
             }
           }
           EOF
       
-      - name: 🖼️ إنشاء مجلد assets (صور وهمية)
-        run: |
-          mkdir -p assets
-          echo "placeholder" > assets/icon.png
-          echo "placeholder" > assets/splash.png
+      - name: 🗑️ حذف مجلد assets إذا وجد
+        run: rm -rf assets || true
       
-      - name: 🏗️ Prebuild مشروع iOS
+      - name: 🏗️ Prebuild مشروع iOS (بدون صور)
         run: npx expo prebuild --platform ios --clean
       
-      - name: 🛠️ بناء التطبيق (بدون توقيع)
+      - name: 🛠️ بناء التطبيق
         run: |
           cd ios
           
-          # بناء المشروع
           xcodebuild -workspace daily-zen.xcworkspace \
             -scheme daily-zen \
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED="NO" \
             CODE_SIGNING_REQUIRED="NO" \
-            ONLY_ACTIVE_ARCH="NO" \
             -derivedDataPath build \
             clean build
           
-          # إنشاء مجلد Payload (هيكل الـ IPA)
-          APP_PATH="build/Build/Products/Release-iphoneos/daily-zen.app"
+          PAYLOAD_PATH="build/Build/Products/Release-iphoneos/daily-zen.app"
           
-          if [ -d "$APP_PATH" ]; then
+          if [ -d "$PAYLOAD_PATH" ]; then
             mkdir -p Payload
-            cp -r "$APP_PATH" Payload/
+            cp -r "$PAYLOAD_PATH" Payload/
             zip -r ../daily-zen.ipa Payload
-            echo "✅ تم إنشاء ملف IPA بنجاح!"
+            echo "✅ تم إنشاء IPA بنجاح!"
             ls -la ../daily-zen.ipa
           else
-            echo "❌ لم يتم العثور على ملف .app"
-            find . -name "*.app"
+            echo "❌ لم نجد ملف .app"
             exit 1
           fi
       
-      - name: 📤 رفع ملف IPA كـ Artifact
+      - name: 📤 رفع IPA
         uses: actions/upload-artifact@v4
         with:
           name: daily-zen-ipa
           path: daily-zen.ipa
-          if-no-files-found: error
-      
-      - name: ✅ بناء ناجح
-        run: echo "🎉 تم بناء التطبيق على سحابة macOS!"
