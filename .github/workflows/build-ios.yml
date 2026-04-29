@@ -1,0 +1,47 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Setup Expo
+        run: |
+          npm install -g expo-cli eas-cli
+          npm install
+      
+      - name: Setup EAS credentials
+        run: |
+          echo "{}" > credentials.json
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: Build iOS with EAS
+        run: |
+          npx expo login -u ${{ secrets.EXPO_USERNAME }} -p ${{ secrets.EXPO_PASSWORD }}
+          eas build --platform ios --non-interactive --no-wait
+      
+      - name: Download IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: app-ipa
+          path: .
+      
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: app.ipa
+          path: *.ipa
