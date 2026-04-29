@@ -1,4 +1,4 @@
-name: Build iOS IPA (No Images)
+name: Build Valid iOS IPA
 
 on:
   push:
@@ -19,53 +19,77 @@ jobs:
           node-version: '18'
       
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          npm install -g expo-cli
       
-      - name: Create dummy assets
+      - name: Create assets folder with dummy images
         run: |
           mkdir -p assets
-          echo "dummy" > assets/icon.png
-          echo "dummy" > assets/splash.png
-          echo "dummy" > assets/adaptive-icon.png
-          echo "dummy" > assets/favicon.png
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/icon.png
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/splash.png
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/adaptive-icon.png
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 --decode > assets/favicon.png
       
-      - name: Install Expo CLI
-        run: npm install -g expo-cli
-      
-      - name: Prebuild iOS project (ignore missing assets)
+      - name: Create minimal app.json
         run: |
-          npx expo prebuild --platform ios --clean --non-interactive || true
+          cat > app.json << 'EOF'
+          {
+            "expo": {
+              "name": "daily-zen",
+              "slug": "daily-zen",
+              "version": "1.0.0",
+              "orientation": "portrait",
+              "icon": "./assets/icon.png",
+              "userInterfaceStyle": "light",
+              "splash": {
+                "resizeMode": "contain",
+                "backgroundColor": "#ffffff"
+              },
+              "assetBundlePatterns": ["**/*"],
+              "ios": {
+                "supportsTablet": true,
+                "bundleIdentifier": "com.en5023047.dailyzen"
+              },
+              "android": {
+                "package": "com.en5023047.dailyzen"
+              }
+            }
+          }
+          EOF
+      
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --clean
+      
+      - name: Build IPA
+        run: |
+          cd ios
+          xcodebuild -workspace daily-zen.xcworkspace \
+            -scheme daily-zen \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
           
-          # إنشاء مشروع iOS يدوياً إذا فشل prebuild
-          if [ ! -d "ios" ]; then
-            npx expo run:ios --no-build --non-interactive
-          fi
+          # إنشاء IPA
+          mkdir Payload
+          cp -r build/Release-iphoneos/daily-zen.app Payload/
+          zip -r ../daily-zen.ipa Payload
+          
+          # التحقق من حجم الملف
+          ls -la ../daily-zen.ipa
       
-      - name: Build IPA without signing
+      - name: Verify IPA file
         run: |
-          if [ -d "ios" ]; then
-            cd ios
-            xcodebuild -workspace daily-zen.xcworkspace \
-              -scheme daily-zen \
-              -configuration Release \
-              -sdk iphoneos \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              -derivedDataPath build \
-              clean build || true
-            
-            # محاولة إنشاء IPA حتى لو فشل جزئياً
-            if [ -d "build/Build/Products/Release-iphoneos/daily-zen.app" ]; then
-              mkdir -p Payload
-              cp -r build/Build/Products/Release-iphoneos/daily-zen.app Payload/
-              zip -r ../daily-zen.ipa Payload
-            else
-              echo "Build failed, creating empty placeholder"
-              echo "Placeholder" > ../daily-zen.ipa
-            fi
+          if [ -f "daily-zen.ipa" ] && [ -s "daily-zen.ipa" ]; then
+            echo "✅ IPA file created successfully"
+            file daily-zen.ipa
+            unzip -l daily-zen.ipa | head -20
           else
-            echo "iOS folder not found" > ../daily-zen.ipa
+            echo "❌ IPA file is empty or missing"
+            exit 1
           fi
       
       - name: Upload IPA
@@ -73,3 +97,4 @@ jobs:
         with:
           name: daily-zen-ipa
           path: daily-zen.ipa
+          if-no-files-found: error
