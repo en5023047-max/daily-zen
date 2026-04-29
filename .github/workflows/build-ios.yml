@@ -1,4 +1,4 @@
-name: Build iOS IPA (Auto-detect)
+name: Build iOS IPA (No Images)
 
 on:
   push:
@@ -23,16 +23,7 @@ jobs:
           npm install
           npm install -g expo-cli
       
-      - name: Create assets folder
-        run: |
-          mkdir -p assets
-          # إنشاء صور فارغة بصيغة PNG صالحة
-          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\xdac\xfc\xff\xff?\x00\x05\xfe\x02\xfe\xb0\xb5\x0f\x17\x00\x00\x00\x00IEND\xaeB`\x82' > assets/icon.png
-          cp assets/icon.png assets/splash.png
-          cp assets/icon.png assets/adaptive-icon.png
-          cp assets/icon.png assets/favicon.png
-      
-      - name: Create minimal app.json
+      - name: Create minimal app.json (no splash screen)
         run: |
           cat > app.json << 'EOF'
           {
@@ -41,12 +32,8 @@ jobs:
               "slug": "daily-zen",
               "version": "1.0.0",
               "orientation": "portrait",
-              "icon": "./assets/icon.png",
+              "icon": null,
               "userInterfaceStyle": "light",
-              "splash": {
-                "resizeMode": "contain",
-                "backgroundColor": "#ffffff"
-              },
               "assetBundlePatterns": ["**/*"],
               "ios": {
                 "supportsTablet": true,
@@ -56,62 +43,70 @@ jobs:
           }
           EOF
       
-      - name: Prebuild iOS project
-        run: npx expo prebuild --platform ios --clean
-      
-      - name: List files to find project name
+      - name: Remove assets requirements from app.json
         run: |
-          echo "Listing iOS directory:"
-          ls -la ios/ || echo "ios directory not found"
-          echo ""
-          echo "Looking for .xcworkspace or .xcodeproj:"
-          find . -name "*.xcworkspace" -o -name "*.xcodeproj" 2>/dev/null
+          # حذف أي إشارة للمجلد assets من app.json
+          sed -i '' '/icon/d' app.json
+          sed -i '' '/splash/d' app.json
       
-      - name: Build IPA
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --clean --non-interactive
+        continue-on-error: true
+      
+      - name: Fix Podfile
+        run: |
+          cd ios
+          # إنشاء Podfile إذا لم يوجد
+          if [ ! -f "Podfile" ]; then
+            cat > Podfile << 'EOF'
+            require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
+            require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
+            require File.join(File.dirname(`node --print "require.resolve('@react-native-community/cli-platform-ios/package.json")`), "native_modules")
+
+            platform :ios, '13.0'
+
+            target 'daily-zen' do
+              config = use_native_modules!
+              use_frameworks! :linkage => :static
+              use_react_native!(:path => config["reactNativePath"])
+
+              pod 'expo-dev-client', path: '../node_modules/expo-dev-client'
+              pod 'ExpoModulesCore', path: '../node_modules/expo-modules-core'
+              
+              use_expo_modules!
+            end
+            EOF
+          fi
+      
+      - name: Install pods
+        run: |
+          cd ios
+          pod install --repo-update
+      
+      - name: Build IPA without signing
         run: |
           cd ios
           
-          # البحث عن ملف xcworkspace أو xcodeproj
-          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
-          PROJECT=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
+          # بناء التطبيق
+          xcodebuild -workspace daily-zen.xcworkspace \
+            -scheme daily-zen \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath build \
+            clean build
           
-          if [ -n "$WORKSPACE" ]; then
-            echo "Building with workspace: $WORKSPACE"
-            xcodebuild -workspace "$WORKSPACE" \
-              -scheme daily-zen \
-              -configuration Release \
-              -sdk iphoneos \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              build
-          elif [ -n "$PROJECT" ]; then
-            echo "Building with project: $PROJECT"
-            xcodebuild -project "$PROJECT" \
-              -scheme daily-zen \
-              -configuration Release \
-              -sdk iphoneos \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              build
-          else
-            echo "No workspace or project found!"
-            ls -la
-            exit 1
-          fi
-          
-          # البحث عن مجلد build الناتج
-          if [ -d "build/Release-iphoneos/daily-zen.app" ]; then
+          # إنشاء IPA
+          APP_PATH="build/Build/Products/Release-iphoneos/daily-zen.app"
+          if [ -d "$APP_PATH" ]; then
             mkdir -p Payload
-            cp -r build/Release-iphoneos/daily-zen.app Payload/
+            cp -r "$APP_PATH" Payload/
             zip -r ../daily-zen.ipa Payload
-          elif [ -d "build/Build/Products/Release-iphoneos/daily-zen.app" ]; then
-            mkdir -p Payload
-            cp -r build/Build/Products/Release-iphoneos/daily-zen.app Payload/
-            zip -r ../daily-zen.ipa Payload
+            echo "✅ IPA created successfully"
           else
-            echo "Could not find .app file"
+            echo "❌ Could not find .app file"
             find . -name "*.app" 2>/dev/null
             exit 1
           fi
