@@ -1,0 +1,16 @@
+{
+  "project": "daily-zen",
+  "platform": "ios",
+  "github": {
+    "owner": "en5023047-max",
+    "repo": "daily-zen"
+  },
+  "ios": {},
+  "flutter": {
+    "watch": {}
+  },
+  "reactNative": {
+    "expo": true
+  },
+  "mobai": {}
+}
