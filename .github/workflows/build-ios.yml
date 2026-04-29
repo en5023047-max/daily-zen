@@ -1,9 +1,9 @@
-name: Build iOS IPA
+name: Build iOS IPA (Simplified)
 
 on:
-  workflow_dispatch:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,30 +18,35 @@ jobs:
         with:
           node-version: '18'
       
-      - name: Setup Expo
-        run: |
-          npm install -g expo-cli eas-cli
-          npm install
+      - name: Install dependencies
+        run: npm install
       
-      - name: Setup EAS credentials
-        run: |
-          echo "{}" > credentials.json
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Install Expo CLI
+        run: npm install -g expo-cli
       
-      - name: Build iOS with EAS
-        run: |
-          npx expo login -u ${{ secrets.EXPO_USERNAME }} -p ${{ secrets.EXPO_PASSWORD }}
-          eas build --platform ios --non-interactive --no-wait
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --clean
       
-      - name: Download IPA
-        uses: actions/download-artifact@v4
-        with:
-          name: app-ipa
-          path: .
+      - name: Build IPA without signing
+        run: |
+          cd ios
+          xcodebuild -workspace daily-zen.xcworkspace \
+            -scheme daily-zen \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath build \
+            clean build
+          
+          # Create IPA
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/daily-zen.app Payload/
+          zip -r ../daily-zen.ipa Payload
       
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: app.ipa
-          path: *.ipa
+          name: daily-zen-ipa
+          path: daily-zen.ipa
