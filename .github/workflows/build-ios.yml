@@ -1,4 +1,4 @@
-name: Build iOS IPA (No Images)
+name: Build iOS IPA (Simplified)
 
 on:
   push:
@@ -23,16 +23,14 @@ jobs:
           npm install
           npm install -g expo-cli
       
-      - name: Create minimal app.json (no splash screen)
+      - name: Create minimal app.json
         run: |
-          cat > app.json << 'EOF'
-          {
+          echo '{
             "expo": {
               "name": "daily-zen",
               "slug": "daily-zen",
               "version": "1.0.0",
               "orientation": "portrait",
-              "icon": null,
               "userInterfaceStyle": "light",
               "assetBundlePatterns": ["**/*"],
               "ios": {
@@ -40,54 +38,24 @@ jobs:
                 "bundleIdentifier": "com.en5023047.dailyzen"
               }
             }
-          }
-          EOF
+          }' > app.json
       
-      - name: Remove assets requirements from app.json
+      - name: Create empty assets
         run: |
-          # حذف أي إشارة للمجلد assets من app.json
-          sed -i '' '/icon/d' app.json
-          sed -i '' '/splash/d' app.json
+          mkdir -p assets
+          touch assets/icon.png assets/splash.png
       
-      - name: Prebuild iOS project
-        run: npx expo prebuild --platform ios --clean --non-interactive
-        continue-on-error: true
-      
-      - name: Fix Podfile
-        run: |
-          cd ios
-          # إنشاء Podfile إذا لم يوجد
-          if [ ! -f "Podfile" ]; then
-            cat > Podfile << 'EOF'
-            require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
-            require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
-            require File.join(File.dirname(`node --print "require.resolve('@react-native-community/cli-platform-ios/package.json")`), "native_modules")
-
-            platform :ios, '13.0'
-
-            target 'daily-zen' do
-              config = use_native_modules!
-              use_frameworks! :linkage => :static
-              use_react_native!(:path => config["reactNativePath"])
-
-              pod 'expo-dev-client', path: '../node_modules/expo-dev-client'
-              pod 'ExpoModulesCore', path: '../node_modules/expo-modules-core'
-              
-              use_expo_modules!
-            end
-            EOF
-          fi
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --clean
       
       - name: Install pods
         run: |
           cd ios
-          pod install --repo-update
+          pod install
       
-      - name: Build IPA without signing
+      - name: Build IPA
         run: |
           cd ios
-          
-          # بناء التطبيق
           xcodebuild -workspace daily-zen.xcworkspace \
             -scheme daily-zen \
             -configuration Release \
@@ -95,21 +63,11 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            -derivedDataPath build \
             clean build
           
-          # إنشاء IPA
-          APP_PATH="build/Build/Products/Release-iphoneos/daily-zen.app"
-          if [ -d "$APP_PATH" ]; then
-            mkdir -p Payload
-            cp -r "$APP_PATH" Payload/
-            zip -r ../daily-zen.ipa Payload
-            echo "✅ IPA created successfully"
-          else
-            echo "❌ Could not find .app file"
-            find . -name "*.app" 2>/dev/null
-            exit 1
-          fi
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/daily-zen.app Payload/
+          zip -r ../daily-zen.ipa Payload
       
       - name: Upload IPA
         uses: actions/upload-artifact@v4
