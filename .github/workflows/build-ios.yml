@@ -24,62 +24,102 @@ jobs:
       - name: 🍎 تثبيت Expo CLI
         run: npm install -g expo-cli
       
-      - name: 📝 إنشاء app.json بدون أي صور
+      - name: 🔍 التحقق من الملفات قبل prebuild
         run: |
-          cat > app.json << 'EOF'
-          {
-            "expo": {
-              "name": "daily-zen",
-              "slug": "daily-zen",
-              "version": "1.0.0",
-              "orientation": "portrait",
-              "userInterfaceStyle": "light",
-              "assetBundlePatterns": ["**/*"],
-              "ios": {
-                "supportsTablet": true,
-                "bundleIdentifier": "com.dailyzen.app"
-              },
-              "android": {
-                "package": "com.dailyzen.app"
-              }
-            }
-          }
-          EOF
+          echo "📂 الملفات الموجودة:"
+          ls -la
+          echo ""
+          echo "📄 محتوى app.json:"
+          cat app.json || echo "app.json غير موجود"
       
-      - name: 🗑️ حذف مجلد assets إذا وجد
-        run: rm -rf assets || true
+      - name: 🏗️ تشغيل prebuild مع حفظ السجل
+        run: |
+          npx expo prebuild --platform ios --clean 2>&1 | tee prebuild.log
+          echo "✅ اكتمل prebuild (قد يكون فشل جزئياً)"
       
-      - name: 🏗️ Prebuild مشروع iOS (بدون صور)
-        run: npx expo prebuild --platform ios --clean
+      - name: 🔍 التحقق من ناتج prebuild
+        run: |
+          echo "📂 ماذا يوجد بعد prebuild؟"
+          ls -la
+          echo ""
+          echo "📂 هل يوجد مجلد ios؟"
+          if [ -d "ios" ]; then
+            echo "✅ مجلد ios موجود"
+            ls -la ios/
+          else
+            echo "❌ مجلد ios غير موجود - prebuild فشل"
+            cat prebuild.log | tail -50
+            exit 1
+          fi
+          
+          echo ""
+          echo "📂 هل يوجد ملف xcworkspace؟"
+          find . -name "*.xcworkspace"
+      
+      - name: 🛠️ إنشاء xcworkspace يدوياً إذا لم يوجد
+        run: |
+          if [ ! -f "ios/daily-zen.xcworkspace" ] && [ -d "ios" ]; then
+            echo "⚠️ إنشاء xcworkspace يدوياً"
+            cd ios
+            pod init
+            pod install
+            cd ..
+          fi
       
       - name: 🛠️ بناء التطبيق
         run: |
-          cd ios
-          
-          xcodebuild -workspace daily-zen.xcworkspace \
-            -scheme daily-zen \
-            -configuration Release \
-            -sdk iphoneos \
-            CODE_SIGNING_ALLOWED="NO" \
-            CODE_SIGNING_REQUIRED="NO" \
-            -derivedDataPath build \
-            clean build
-          
-          PAYLOAD_PATH="build/Build/Products/Release-iphoneos/daily-zen.app"
-          
-          if [ -d "$PAYLOAD_PATH" ]; then
-            mkdir -p Payload
-            cp -r "$PAYLOAD_PATH" Payload/
-            zip -r ../daily-zen.ipa Payload
-            echo "✅ تم إنشاء IPA بنجاح!"
-            ls -la ../daily-zen.ipa
+          if [ -d "ios" ]; then
+            cd ios
+            
+            # البحث عن workspace أو project
+            WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+            PROJECT=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
+            
+            if [ -n "$WORKSPACE" ]; then
+              echo "📱 بناء باستخدام workspace: $WORKSPACE"
+              xcodebuild -workspace "$WORKSPACE" \
+                -scheme daily-zen \
+                -configuration Release \
+                -sdk iphoneos \
+                CODE_SIGNING_ALLOWED="NO" \
+                CODE_SIGNING_REQUIRED="NO" \
+                -derivedDataPath build \
+                clean build
+            elif [ -n "$PROJECT" ]; then
+              echo "📱 بناء باستخدام project: $PROJECT"
+              xcodebuild -project "$PROJECT" \
+                -scheme daily-zen \
+                -configuration Release \
+                -sdk iphoneos \
+                CODE_SIGNING_ALLOWED="NO" \
+                CODE_SIGNING_REQUIRED="NO" \
+                -derivedDataPath build \
+                clean build
+            else
+              echo "❌ لا يوجد workspace ولا project"
+              ls -la
+              exit 1
+            fi
+            
+            # البحث عن ملف .app الناتج
+            APP_PATH=$(find build -name "*.app" | head -1)
+            if [ -n "$APP_PATH" ]; then
+              mkdir -p Payload
+              cp -r "$APP_PATH" Payload/
+              zip -r ../daily-zen.ipa Payload
+              echo "✅ تم إنشاء IPA!"
+            else
+              echo "❌ لم نجد ملف .app"
+              exit 1
+            fi
           else
-            echo "❌ لم نجد ملف .app"
+            echo "❌ مجلد ios غير موجود"
             exit 1
           fi
       
       - name: 📤 رفع IPA
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: daily-zen-ipa
           path: daily-zen.ipa
